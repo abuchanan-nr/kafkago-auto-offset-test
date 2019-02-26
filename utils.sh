@@ -2,7 +2,7 @@
 de='docker exec -it kafka-offset-tester'
 
 start_kafka() {
-  docker run -d --name kafka-offset-tester -p 2181:2181 -p 9092:9092 kafka-offset-tester
+  docker run -d --rm --name kafka-offset-tester -p 2181:2181 -p 9092:9092 kafka-offset-tester
 }
 
 create_topic() {
