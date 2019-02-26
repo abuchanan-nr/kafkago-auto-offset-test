@@ -6,74 +6,99 @@ import (
 	"os"
 	"time"
 
-	kafka "github.com/newrelic-forks/kafka-go"
+	kafka "github.com/segmentio/kafka-go"
 )
 
 func main() {
-	logger := log.New(os.Stderr, "kafka-go: ", log.LstdFlags)
+	ctx := context.Background()
+	logger := log.New(os.Stderr, "kafka-go: ", log.LstdFlags|log.Lshortfile)
+	topic := "test-3"
+
+	p, err := kafka.LookupPartition(ctx, "tcp", "localhost:9092", topic, 0)
+	if err != nil {
+		panic(err)
+	}
+
+	conn, err := kafka.DialPartition(ctx, "tcp", "localhost:9092", p)
+	if err != nil {
+		panic(err)
+	}
 
 	writer := kafka.NewWriter(kafka.WriterConfig{
-		Brokers:         []string{"localhost:9092"},
-		Topic:           "test-2",
-		Async:           true,
-		BatchSize:       100,
-		MaxMessageBytes: 1048576,
-		RequiredAcks:    -1,
-		QueueCapacity:   16384,
-		BatchTimeout:    500 * time.Millisecond,
-		ErrorLogger:     logger,
+		Brokers: []string{"localhost:9092"},
+		Topic:   topic,
+		//Async:         true,
+		BatchSize:     1,
+		RequiredAcks:  -1,
+		QueueCapacity: 1,
+		BatchTimeout:  10 * time.Millisecond,
+		ErrorLogger:   logger,
+		//Logger:        logger,
 	})
 	defer writer.Close()
 
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:     []string{"localhost:9092"},
-		Topic:       "test-2",
-		GroupID:     "group-test",
+		Topic:       topic,
+		GroupID:     "group-test-3",
 		ErrorLogger: logger,
+		//Logger:          logger,
+		AutoOffsetReset: kafka.FirstOffset,
+		QueueCapacity:   1,
+		MaxWait:         time.Second,
 	})
 	defer reader.Close()
 
-	ctx := context.Background()
-	k, v := []byte{}, []byte{}
+	msgs := make([]kafka.Message, 100)
 
-	// Write messages continuously.
+	var last int64
+	var written int
+	var read int
+
 	go func() {
-		i := 0
 		for {
-			i++
-			err := writer.WriteMessages(ctx, kafka.Message{
-				Key:   k,
-				Value: v,
-			})
+			err := writer.WriteMessages(ctx, msgs...)
 			if err != nil {
 				panic(err)
 			}
 
-			if i%10000 == 0 {
-				log.Printf("wrote %d messages", i)
+			written += len(msgs)
+			if written%100000 == 0 {
+				log.Printf("%d messages written", written)
 			}
-			time.Sleep(time.Millisecond)
 		}
 	}()
 
-	var last int64
-	j := 0
+	go func() {
+		for {
+			firstOffset, lastOffset, err := conn.ReadOffsets()
+			if err != nil {
+				panic(err)
+			}
+			log.Printf("first offset: %d, last offset: %d", firstOffset, lastOffset)
+			time.Sleep(5 * time.Second)
+		}
+	}()
+
 	for {
-		msg, err := reader.ReadMessage(ctx)
+		firstOffset, lastOffset, err := conn.ReadOffsets()
 		if err != nil {
 			panic(err)
 		}
-		j++
-		if j%100 == 0 {
-			log.Printf("read %d messages", j)
+
+		msg, _ := reader.ReadMessage(ctx)
+
+		read++
+		if read%1000 == 0 {
+			log.Printf("%d messages read", read)
 		}
 
 		// Log when the offset jumps.
 		if msg.Offset-last > 1 {
+			log.Printf("first offset: %d, last offset: %d", firstOffset, lastOffset)
 			log.Println("OFFSET", msg.Offset)
 		}
 		last = msg.Offset
-
-		time.Sleep(time.Millisecond * 50)
+		time.Sleep(time.Millisecond)
 	}
 }

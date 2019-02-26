@@ -16,7 +16,7 @@ describe_topic() {
 }
 
 describe_consumers() {
-  $de bin/kafka-consumer-groups.sh --describe --bootstrap-server localhost:9092 --group group-test
+  $de bin/kafka-consumer-groups.sh --bootstrap-server localhost:9092 --topic test-3 --describe
 }
 
 tail_logs() {
